@@ -100,16 +100,50 @@ int main() {
           */
           double steer_value;
           double throttle_value;
+          // in order to use the same approach as in class we need to convet to car reference frame
+          // _cf stands for car frame of reference
+          Eigen::VectorXd  ptsx_cf = Eigen::VectorXd(ptsx.size());
+          Eigen::VectorXd  ptsy_cf = Eigen::VectorXd(ptsx.size());
+
+          for (unsigned int i = 0;   i < ptsx.size() ;   i++) {
+            ptsx_cf(i) = (ptsx[i] - px) * cos(psi) + (ptsy[i] - py) * sin(psi);
+            ptsy_cf(i) = (ptsy[i] - py) * cos(psi) - (ptsx[i] - px) * sin(psi);
+          }
+          // now fit a polynomial on the points in car reference frame
+          auto coeffs = polyfit(ptsx_cf, ptsy_cf, 2);
+          // calculate error and define state from received values
+          // when transformed to car reference frame px and py are 0
+          double cte = polyeval(coeffs, 0.0);
+          double epsi = psi - atan(coeffs[1]);
+          std::cout << "cte: " << cte << " epsi: " << epsi << endl;
+          Eigen::VectorXd state(6);
+          state << 0.0, 0.0, psi, v, cte, epsi;
+          auto vars = mpc.Solve(state, coeffs);
+          steer_value = vars[0];
+          throttle_value = vars[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle_value;
+          msgJson["steering_angle"] = steer_value / deg2rad(25);
+          msgJson["throttle"] = throttle_value/500;
 
           //Display the MPC predicted trajectory 
+          /*vector<double> mpc_x_vals;
+          vector<double> mpc_y_vals;
+          // number of steps predicted N
+          int N = (vars.size() / 2) -1;
+          for (int i = 0; i < N; i++) {
+            mpc_x_vals.push_back(vars[i+2]);
+            mpc_y_vals.push_back(vars[i+2+N]);
+          }*/
+          // check fitted poly:
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
+          for (int i = 0; i<100; i++) {
+              mpc_x_vals.push_back(double(i));
+              mpc_y_vals.push_back(polyeval(coeffs, double(i)));
+          }
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -118,8 +152,8 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals(&ptsx_cf[0], ptsx_cf.data() + ptsx_cf.cols() * ptsx_cf.rows());
+          vector<double> next_y_vals(&ptsy_cf[0], ptsy_cf.data() + ptsy_cf.cols() * ptsy_cf.rows());
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
