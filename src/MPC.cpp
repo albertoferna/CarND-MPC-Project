@@ -6,10 +6,10 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 8;
-double dt = 0.1;
+size_t N = 6;
+double dt = 0.15;
 // also setup a velocity objective
-double ref_v = 20;
+double ref_v = 30;
 // Using the same approach than in class to make it easier on indices
 size_t x_start = 0;
 size_t y_start = x_start + N;
@@ -44,22 +44,27 @@ class FG_eval {
     // `fg` a vector of the cost constraints, `vars` is a vector of variable values (state & actuators)
     // NOTE: You'll probably go back and forth between this function and
     // the Solver function below.
+    // Set up some weights to tune each penalty influence
+    double w_ref = 1.0;
+    double w_act = 10.0;
+    double w_seq = 1.0;
+    fg[0] = 0.0;
     // Reference State Cost
     for (size_t t = 0; t < N; t++) {
-      fg[0] += CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += CppAD::pow(vars[epsi_start + t], 2);
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      fg[0] += 5 * CppAD::pow(vars[cte_start + t], 2);
+      fg[0] += 30 * CppAD::pow(vars[epsi_start + t], 2);
+      fg[0] += 1 * CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
     // Minimize the use of actuators.
     for (size_t t = 0; t < N - 1; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t], 2);
+      fg[0] += 500 * CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += 1 * CppAD::pow(vars[a_start + t], 2);
     }
 
     // Minimize the value gap between sequential actuations.
     for (size_t t = 0; t < N - 2; t++) {
-      fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      fg[0] += 400 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += 1 * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
     // Setup Constraints
@@ -89,8 +94,9 @@ class FG_eval {
       AD<double> a0 = vars[a_start + t - 1];
       AD<double> delta0 = vars[delta_start + t - 1];
 
-      AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * CppAD::pow(x0,2);
-      AD<double> psides0 = CppAD::atan(coeffs[1] + coeffs[2] * CppAD::pow(x0,2));
+      // this is hard coded for a degree 3 polynomial
+      AD<double> f0 = coeffs[0] + coeffs[1] * x0 + coeffs[2] * CppAD::pow(x0,2) + coeffs[3] * CppAD::pow(x0,3);
+      AD<double> psides0 = CppAD::atan(coeffs[1] + (2 * coeffs[2] * x0) + (3 * coeffs[3]* CppAD::pow(x0,2) ));
       //AD<double> f0 = coeffs[0] + coeffs[1] * x0;
       //AD<double> psides0 = CppAD::atan(coeffs[1]);
 
@@ -113,7 +119,6 @@ MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   bool ok = true;
-  //size_t i;
   typedef CPPAD_TESTVECTOR(double) Dvector;
 
   // TODO: Set the number of model variables (includes both states and inputs).
@@ -222,6 +227,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // Cost
   auto cost = solution.obj_value;
   std::cout << "Cost " << cost << std::endl;
+  //std::cout << solution.x << std::endl;
 
   // TODO: Return the first actuator values. The variables can be accessed with
   // `solution.x[i]`.
@@ -230,10 +236,11 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // creates a 2 element double vector.
   // output vector would include actuator instructions (index 0 and 1) and MPC position prediction
   std::vector<double> output(2 * N + 2);
-  output[0] = solution.x[delta_start];
-  output[1] = solution.x[a_start];
+  // Sending control values one step into the future to accomodate latency
+  output[0] = solution.x[delta_start+1];
+  output[1] = solution.x[a_start+1];
   for (unsigned int i = 2; i < output.size(); i++) {
-    output[i] = solution.x[i];
+    output[i] = solution.x[i-2];
   }
   return output;
 }
