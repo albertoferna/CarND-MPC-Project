@@ -6,10 +6,10 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 6;
-double dt = 0.15;
+size_t N = 10;
+double dt = 0.075;
 // also setup a velocity objective
-double ref_v = 30;
+double ref_v = 50;
 // Using the same approach than in class to make it easier on indices
 size_t x_start = 0;
 size_t y_start = x_start + N;
@@ -45,26 +45,26 @@ class FG_eval {
     // NOTE: You'll probably go back and forth between this function and
     // the Solver function below.
     // Set up some weights to tune each penalty influence
-    double w_ref = 1.0;
-    double w_act = 10.0;
-    double w_seq = 1.0;
+    double w_delta = 500.0;
+    double w_err = 10.0;
+    double w_acc = 2.0;
     fg[0] = 0.0;
     // Reference State Cost
     for (size_t t = 0; t < N; t++) {
-      fg[0] += 5 * CppAD::pow(vars[cte_start + t], 2);
-      fg[0] += 30 * CppAD::pow(vars[epsi_start + t], 2);
+      fg[0] += w_err * CppAD::pow(vars[cte_start + t], 2);
+      fg[0] += w_err * CppAD::pow(vars[epsi_start + t], 2);
       fg[0] += 1 * CppAD::pow(vars[v_start + t] - ref_v, 2);
     }
     // Minimize the use of actuators.
     for (size_t t = 0; t < N - 1; t++) {
-      fg[0] += 500 * CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += 1 * CppAD::pow(vars[a_start + t], 2);
+      fg[0] += w_delta * CppAD::pow(vars[delta_start + t], 2);
+      fg[0] += w_acc * CppAD::pow(vars[a_start + t], 2);
     }
 
     // Minimize the value gap between sequential actuations.
     for (size_t t = 0; t < N - 2; t++) {
-      fg[0] += 400 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-      fg[0] += 1 * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+      fg[0] += w_delta * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += w_acc * CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
     }
 
     // Setup Constraints
@@ -105,7 +105,7 @@ class FG_eval {
       fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
       fg[1 + psi_start + t] = psi1 - (psi0 + v0 / Lf * delta0 * dt);
       fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
-      fg[1 + cte_start + t] = cte1 - ((f0 - y0) + v0 * CppAD::cos(epsi0) * dt);
+      fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
       fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
     }
   }
@@ -236,7 +236,7 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   // creates a 2 element double vector.
   // output vector would include actuator instructions (index 0 and 1) and MPC position prediction
   std::vector<double> output(2 * N + 2);
-  // Sending control values one step into the future to accomodate latency
+  // Sending control values some steps into the future to accomodate latency
   output[0] = solution.x[delta_start+1];
   output[1] = solution.x[a_start+1];
   for (unsigned int i = 2; i < output.size(); i++) {
